@@ -1,0 +1,57 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            installer/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build app
+        run: cargo build --release --locked
+
+      - name: Build installer
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\diskscope.exe dist\DiskScope.exe -Force
+          cargo build --release --locked --manifest-path installer\Cargo.toml
+          Copy-Item installer\target\release\diskscope-setup.exe dist\DiskScope-Setup.exe -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiskScope
+          path: |
+            dist/DiskScope.exe
+            dist/DiskScope-Setup.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ github.ref_name }} `
+            "dist/DiskScope.exe#DiskScope.exe (portable)" `
+            "dist/DiskScope-Setup.exe#DiskScope-Setup.exe (installer)" `
+            --title "DiskScope ${{ github.ref_name }}" `
+            --generate-notes

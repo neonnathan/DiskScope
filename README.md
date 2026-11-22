@@ -1,5 +1,7 @@
 ﻿# DiskScope
 
+[![build](https://github.com/neonnathan/DiskScope/actions/workflows/build.yml/badge.svg)](https://github.com/neonnathan/DiskScope/actions/workflows/build.yml)
+
 A fast, dark, native Windows disk-usage analyzer written in Rust (egui).
 Find out what is actually eating your drive: folders, files and installed apps.
 
@@ -89,4 +91,8 @@ buttons (see `uiprobe.ps1`), so it runs unattended.
 | `build.ps1` | release build of app + installer |
 | `test-install.ps1`, `uiprobe.ps1` | automated install/uninstall test |
 | `bench.ps1`, `shot.ps1` | scan benchmark, window screenshots |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
