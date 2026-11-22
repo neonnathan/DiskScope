@@ -3,11 +3,15 @@
 //! A single self-contained Setup.exe: it embeds the app binary, copies it to
 //! %LOCALAPPDATA%\Programs\DiskScope, creates shortcuts, registers itself in
 //! "Apps & features", and can remove everything again with `--uninstall`.
+//!
+//! Pass `/S` (or `--silent`) for an unattended install/uninstall: no dialogs,
+//! no auto-launch, exit code 0 on success and 1 on failure.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -30,12 +34,28 @@ const MB_ICONERROR: u32 = 0x0000_0010;
 const MB_SETFOREGROUND: u32 = 0x0001_0000;
 const IDYES: i32 = 6;
 
+static SILENT: AtomicBool = AtomicBool::new(false);
+static FAILED: AtomicBool = AtomicBool::new(false);
+
+fn silent() -> bool {
+    SILENT.load(Ordering::Relaxed)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--uninstall") {
+    let is_silent = args
+        .iter()
+        .any(|a| a.eq_ignore_ascii_case("/s") || a.eq_ignore_ascii_case("--silent") || a.eq_ignore_ascii_case("-s"));
+    SILENT.store(is_silent, Ordering::Relaxed);
+
+    if args.iter().any(|a| a.eq_ignore_ascii_case("--uninstall") || a.eq_ignore_ascii_case("/u")) {
         uninstall();
     } else {
         install();
+    }
+
+    if FAILED.load(Ordering::Relaxed) {
+        std::process::exit(1);
     }
 }
 
@@ -50,12 +70,21 @@ fn install() {
     }
 
     let exe = dir.join("DiskScope.exe");
-    if let Err(err) = std::fs::write(&exe, APP_BYTES) {
-        error(&format!(
-            "Could not write:\n{}\n\n{err}\n\nIf DiskScope is open, close it and run Setup again.",
-            exe.display()
-        ));
-        return;
+    if std::fs::write(&exe, APP_BYTES).is_err() {
+        // An older copy is probably running and holding the file; stop it and
+        // retry once (this also makes scripted upgrades work).
+        let _ = Command::new("taskkill")
+            .args(["/IM", "DiskScope.exe", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        if let Err(err) = std::fs::write(&exe, APP_BYTES) {
+            error(&format!(
+                "Could not write:\n{}\n\n{err}\n\nIf DiskScope is open, close it and run Setup again.",
+                exe.display()
+            ));
+            return;
+        }
     }
 
     let uninstaller = dir.join("Uninstall.exe");
@@ -82,7 +111,10 @@ fn install() {
         "DiskScope {VERSION} is installed.\n\n{}\n\nStarting DiskScope now.",
         dir.display()
     ));
-    let _ = Command::new(&exe).spawn();
+    // A scripted install should leave the machine quiet.
+    if !silent() {
+        let _ = Command::new(&exe).spawn();
+    }
 }
 
 fn uninstall() {
@@ -90,16 +122,18 @@ fn uninstall() {
         error("Could not find %LOCALAPPDATA%.");
         return;
     };
-    let answer = message(
-        &format!(
-            "Remove DiskScope from this PC?\n\nThis deletes the app, its shortcuts and its registry entry.\nYour own files are not touched.\n\n{}",
-            dir.display()
-        ),
-        "Uninstall DiskScope",
-        MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
-    );
-    if answer != IDYES {
-        return;
+    if !silent() {
+        let answer = message(
+            &format!(
+                "Remove DiskScope from this PC?\n\nThis deletes the app, its shortcuts and its registry entry.\nYour own files are not touched.\n\n{}",
+                dir.display()
+            ),
+            "Uninstall DiskScope",
+            MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
+        );
+        if answer != IDYES {
+            return;
+        }
     }
 
     let exe = dir.join("DiskScope.exe");
@@ -227,7 +261,7 @@ fn write_registry(dir: &Path, exe: &Path, uninstaller: &Path) -> std::io::Result
     )?;
     key.set_value(
         "QuietUninstallString",
-        &format!("\"{}\" --uninstall", uninstaller.display()),
+        &format!("\"{}\" --uninstall /S", uninstaller.display()),
     )?;
     key.set_value("NoModify", &1u32)?;
     key.set_value("NoRepair", &1u32)?;
@@ -250,9 +284,19 @@ fn message(text: &str, title: &str, flags: u32) -> i32 {
 }
 
 fn info(text: &str) {
+    if silent() {
+        return;
+    }
     message(text, "DiskScope", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
 }
 
 fn error(text: &str) {
+    FAILED.store(true, Ordering::Relaxed);
+    if silent() {
+        // No console in a GUI-subsystem binary: leave a breadcrumb on disk.
+        let log = std::env::temp_dir().join("diskscope-setup.log");
+        let _ = std::fs::write(&log, format!("{text}\n"));
+        return;
+    }
     message(text, "DiskScope", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }

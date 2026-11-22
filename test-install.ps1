@@ -75,6 +75,23 @@ Check "desktop lnk gone" (-not (Test-Path $lnkDk))
 Check "registry gone" ($null -eq (Get-ItemProperty $reg -ErrorAction SilentlyContinue))
 Check "install dir gone" (-not (Test-Path $dir))
 
+Write-Host "== silent install (no dialogs)" -ForegroundColor Cyan
+$s = Start-Process -FilePath $setup -ArgumentList "/S" -Wait -PassThru
+Check "exit code 0" ($s.ExitCode -eq 0) "($($s.ExitCode))"
+Check "app exe" (Test-Path (Join-Path $dir "DiskScope.exe"))
+Check "app not launched" (@(Get-Process DiskScope -ErrorAction SilentlyContinue).Count -eq 0)
+Check "shortcuts made" ((Test-Path $lnkSm) -and (Test-Path $lnkDk))
+Check "registry" ($null -ne (Get-ItemProperty $reg -ErrorAction SilentlyContinue))
+Check "quiet uninstall" ((Get-ItemProperty $reg).QuietUninstallString -like "*/S")
+
+Write-Host "== silent uninstall" -ForegroundColor Cyan
+$u2 = Start-Process -FilePath (Join-Path $dir "Uninstall.exe") -ArgumentList "--uninstall", "/S" -Wait -PassThru
+Check "exit code 0" ($u2.ExitCode -eq 0) "($($u2.ExitCode))"
+Start-Sleep -Seconds 3
+Check "app exe gone" (-not (Test-Path (Join-Path $dir "DiskScope.exe")))
+Check "registry gone" ($null -eq (Get-ItemProperty $reg -ErrorAction SilentlyContinue))
+Check "install dir gone" (-not (Test-Path $dir))
+
 Write-Host ""
 if ($fail -eq 0) { Write-Host "ALL CHECKS PASSED" -ForegroundColor Green } else { Write-Host "$fail CHECK(S) FAILED" -ForegroundColor Red }
 exit $fail
