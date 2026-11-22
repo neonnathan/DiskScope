@@ -1,0 +1,7 @@
+# Build output
+/target/
+/installer/target/
+/dist/
+
+# Scratch screenshots from shot.ps1 / bench.ps1
+/shot*.png

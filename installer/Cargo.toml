@@ -1,0 +1,22 @@
+[package]
+name = "diskscope-setup"
+version = "1.0.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
